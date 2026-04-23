@@ -1,9 +1,3 @@
-"""
-Telegram Buyurtma Bot (aiogram 3.x)
-pip install aiogram python-dotenv
-python order_bot.py
-"""
- 
 import asyncio
 import logging
 import re
@@ -17,9 +11,8 @@ from dotenv import load_dotenv
 import os
  
 load_dotenv()
- 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
-ADMIN_ID  = int(os.getenv("ADMIN_ID"))
+GROUP_ID  = int(os.getenv("GROUP_ID"))
  
 logging.basicConfig(level=logging.INFO)
 bot = Bot(token=BOT_TOKEN)
@@ -61,64 +54,45 @@ async def zakaz_handler(message: Message, state: FSMContext):
 async def get_ism(message: Message, state: FSMContext):
     await state.update_data(ism=message.text)
     await state.set_state(Zakaz.nomer)
-    await message.answer(
-        "2️⃣  Telefon raqamingizni yozing 📱\n"
-        "(Masalan: +998901234567)"
-    )
+    await message.answer("2️⃣  Telefon raqamingizni yozing 📱\n(Masalan: +998901234567)")
  
  
 @dp.message(Zakaz.nomer)
 async def get_nomer(message: Message, state: FSMContext):
     phone = message.text.strip()
     if not re.match(r'^\+998\d{9}$', phone):
-        await message.answer(
-            "❌ Noto'g'ri format!\n"
-            "Iltimos, shunday yozing: +998901234567"
-        )
+        await message.answer("❌ Noto'g'ri format!\nMasalan: +998901234567")
         return
     await state.update_data(nomer=phone)
     await state.set_state(Zakaz.manzil)
-    await message.answer(
-        "3️⃣  Yetkazib berish manzilini yozing 📍\n"
-        "(Masalan: Toshkent, Chilonzor 5-kvartal, 12-uy)"
-    )
+    await message.answer("3️⃣  Yetkazib berish manzilini yozing 📍")
  
  
 @dp.message(Zakaz.manzil)
 async def get_manzil(message: Message, state: FSMContext):
     await state.update_data(manzil=message.text)
     await state.set_state(Zakaz.mahsulot)
-    await message.answer(
-        "4️⃣  Mahsulot nomi yoki linkini yozing 🛒\n"
-        "(Masalan: Nike Air Max 90 yoki https://uzum.uz/...)"
-    )
+    await message.answer("4️⃣  Mahsulot nomi yoki linkini yozing 🛒")
  
  
 @dp.message(Zakaz.mahsulot)
 async def get_mahsulot(message: Message, state: FSMContext):
     await state.update_data(mahsulot=message.text)
     await state.set_state(Zakaz.miqdor)
-    await message.answer(
-        "5️⃣  Miqdorini yozing 🔢\n"
-        "(Masalan: 2 dona)"
-    )
+    await message.answer("5️⃣  Miqdorini yozing 🔢 (Masalan: 2 dona)")
  
  
 @dp.message(Zakaz.miqdor)
 async def get_miqdor(message: Message, state: FSMContext):
     await state.update_data(miqdor=message.text)
     await state.set_state(Zakaz.sayt)
-    await message.answer(
-        "6️⃣  Qaysi saytdan zakaz qilaylik? 🌐\n"
-        "(Masalan: uzum.uz, wildberries.ru, amazon.com)"
-    )
+    await message.answer("6️⃣  Qaysi saytdan zakaz qilaylik? 🌐")
  
  
 @dp.message(Zakaz.sayt)
 async def get_sayt(message: Message, state: FSMContext):
     await state.update_data(sayt=message.text)
     d = await state.get_data()
- 
     xulosa = (
         "✅ Buyurtma ma'lumotlari:\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
@@ -152,20 +126,21 @@ async def confirm_yes(message: Message, state: FSMContext):
         "Tez orada siz bilan bog'lanamiz. Rahmat!",
         reply_markup=ReplyKeyboardRemove()
     )
-    admin_xabar = (
-        "🔔 YANGI BUYURTMA!\n"
+ 
+    guruh_xabar = (
+        "🛒 YANGI ZAKAZ!\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 Ism:        {d['ism']}\n"
         f"📞 Telefon:    {d['nomer']}\n"
         f"📍 Manzil:     {d['manzil']}\n"
-        f"🛒 Mahsulot:   {d['mahsulot']}\n"
+        f"🛍 Mahsulot:   {d['mahsulot']}\n"
         f"🔢 Miqdor:     {d['miqdor']}\n"
         f"🌐 Sayt:       {d['sayt']}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
-        f"📱 Telegram: @{user.username or 'yoq'}\n"
-        f"🆔 User ID:  {user.id}\n"
+        f"📱 Telegram:   @{user.username or 'username yoq'}\n"
+        f"\n✅ {d['ism']} zakaz qildi!"
     )
-    await bot.send_message(chat_id=ADMIN_ID, text=admin_xabar)
+    await bot.send_message(chat_id=GROUP_ID, text=guruh_xabar)
     await state.clear()
  
  
@@ -182,10 +157,7 @@ async def confirm_no(message: Message, state: FSMContext):
 @dp.message(Command("bekor"))
 async def bekor_handler(message: Message, state: FSMContext):
     await state.clear()
-    await message.answer(
-        "❌ Bekor qilindi. /zakaz orqali qaytadan boshlang.",
-        reply_markup=ReplyKeyboardRemove()
-    )
+    await message.answer("❌ Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
  
  
 async def main():
@@ -194,4 +166,5 @@ async def main():
  
  
 if __name__ == "__main__":
+    asyncio.run(main())
     asyncio.run(main())
