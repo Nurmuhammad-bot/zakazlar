@@ -1,6 +1,7 @@
 """
 Telegram Buyurtma Bot (aiogram 3.x + Claude AI)
-Bot mahsulotni qabul qilib, Claude orqali eng arzon saytni topadi
+- 3 marta bekor = 15 daqiqa blok
+- Telefon raqami guruhda yashirin ko'rinadi
 pip install aiogram python-dotenv anthropic
 """
  
@@ -8,6 +9,7 @@ import asyncio
 import logging
 import re
 import anthropic
+from datetime import datetime, timedelta
 from aiogram import Bot, Dispatcher, F
 from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
 from aiogram.filters import Command
@@ -27,6 +29,71 @@ bot    = Bot(token=BOT_TOKEN)
 dp     = Dispatcher(storage=MemoryStorage())
 client = anthropic.Anthropic(api_key=ANTHROPIC_KEY)
  
+# Blok tizimi: {user_id: {"count": 0, "blocked_until": None}}
+bekor_hisobi = {}
+ 
+BLOCK_MINUTES = 15
+MAX_BEKOR     = 3
+ 
+ 
+def secret_phone(phone: str) -> str:
+    """Telefon raqamini yashiradi: +998901234567 → +998 9** ***567"""
+    if len(phone) >= 10:
+        return phone[:5] + " " + phone[5] + "** ***" + phone[-3:]
+    return "***"
+ 
+ 
+def is_blocked(user_id: int) -> tuple[bool, int]:
+    """Foydalanuvchi bloklanganmi? (blokmi, qolgan daqiqa)"""
+    if user_id not in bekor_hisobi:
+        return False, 0
+    data = bekor_hisobi[user_id]
+    if data.get("blocked_until") and datetime.now() < data["blocked_until"]:
+        qoldi = int((data["blocked_until"] - datetime.now()).total_seconds() / 60) + 1
+        return True, qoldi
+    return False, 0
+ 
+ 
+def add_bekor(user_id: int) -> int:
+    """Bekor sonini oshiradi, kerak bo'lsa bloklaydi. Qaytaradi: qolgan urinish"""
+    if user_id not in bekor_hisobi:
+        bekor_hisobi[user_id] = {"count": 0, "blocked_until": None}
+ 
+    # Blok vaqti o'tgan bo'lsa reset
+    data = bekor_hisobi[user_id]
+    if data.get("blocked_until") and datetime.now() >= data["blocked_until"]:
+        data["count"] = 0
+        data["blocked_until"] = None
+ 
+    data["count"] += 1
+ 
+    if data["count"] >= MAX_BEKOR:
+        data["blocked_until"] = datetime.now() + timedelta(minutes=BLOCK_MINUTES)
+        data["count"] = 0
+        return 0  # bloklandi
+ 
+    return MAX_BEKOR - data["count"]  # qolgan urinish
+ 
+ 
+def find_best_site(mahsulot: str, miqdor: str) -> str:
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=400,
+        messages=[{
+            "role": "user",
+            "content": (
+                f"Mahsulot: {mahsulot}, miqdor: {miqdor}\n\n"
+                "O'zbekistonda bu mahsulotni qaysi saytda eng arzon va tez topish mumkin?\n"
+                "Uzum.uz, Olx.uz, Wildberries.uz, Ozon.uz taqqoslab:\n"
+                "- Eng yaxshi sayt\n"
+                "- Taxminiy narx (so'mda)\n"
+                "- Sayt linki\n"
+                "Qisqa va aniq javob ber."
+            )
+        }]
+    )
+    return response.content[0].text
+ 
  
 class Zakaz(StatesGroup):
     ism        = State()
@@ -37,50 +104,33 @@ class Zakaz(StatesGroup):
     tasdiqlash = State()
  
  
-def find_best_site(mahsulot: str, miqdor: str) -> str:
-    """Claude API orqali eng arzon saytni topadi"""
-    response = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=500,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Mahsulot: {mahsulot}\n"
-                    f"Miqdor: {miqdor}\n\n"
-                    "O'zbekistonda bu mahsulotni sotadigan saytlarni tahlil qil. "
-                    "Uzum.uz, Olx.uz, Wildberries.uz, Ozon.uz kabi saytlardan "
-                    "qaysi birida eng arzon va qulay bo'lishini ayt.\n\n"
-                    "Qisqa javob ber (3-5 qator):\n"
-                    "1. Eng yaxshi sayt va taxminiy narx\n"
-                    "2. Sababi (arzonligi, yetkazib berishi)\n"
-                    "3. Sayt linki"
-                )
-            }
-        ]
-    )
-    return response.content[0].text
- 
- 
 @dp.message(Command("start"))
 async def start_handler(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    blocked, qoldi = is_blocked(user_id)
+    if blocked:
+        await message.answer(f"🚫 Siz {qoldi} daqiqaga bloklandingiz.\nKeyinroq urinib ko'ring.")
+        return
     await state.clear()
     await message.answer(
         "👋 Salom! Smart Buyurtma Botiga xush kelibsiz!\n\n"
-        "🤖 Men mahsulotingizni qabul qilib,\n"
-        "eng arzon saytni avtomatik topaman!\n\n"
-        "Boshlash uchun /zakaz buyrug'ini bosing.",
+        "🤖 Mahsulotingizni ayting — men eng arzon saytni o'zim topaman!\n\n"
+        "Boshlash uchun /zakaz bosing.",
         reply_markup=ReplyKeyboardRemove()
     )
  
  
 @dp.message(Command("zakaz"))
 async def zakaz_handler(message: Message, state: FSMContext):
+    user_id = message.from_user.id
+    blocked, qoldi = is_blocked(user_id)
+    if blocked:
+        await message.answer(f"🚫 Siz {qoldi} daqiqaga bloklandingiz.\nKeyinroq urinib ko'ring.")
+        return
     await state.set_state(Zakaz.ism)
     await message.answer(
         "📋 Buyurtma boshlandi!\n\n"
-        "1️⃣  Ism va familiyangizni yozing:\n"
-        "(Masalan: Alisher Karimov)",
+        "1️⃣  Ism va familiyangizni yozing:",
         reply_markup=ReplyKeyboardRemove()
     )
  
@@ -107,7 +157,7 @@ async def get_nomer(message: Message, state: FSMContext):
 async def get_manzil(message: Message, state: FSMContext):
     await state.update_data(manzil=message.text)
     await state.set_state(Zakaz.mahsulot)
-    await message.answer("4️⃣  Qaysi mahsulotni xohlaysiz? 🛒\n(Masalan: Nike Air Max 90, iPhone 15, Samsung TV)")
+    await message.answer("4️⃣  Qaysi mahsulotni xohlaysiz? 🛒")
  
  
 @dp.message(Zakaz.mahsulot)
@@ -122,7 +172,6 @@ async def get_miqdor(message: Message, state: FSMContext):
     await state.update_data(miqdor=message.text)
     d = await state.get_data()
  
-    # AI tahlil qilmoqda
     await message.answer("🤖 AI eng arzon saytni qidiryapti... ⏳")
  
     try:
@@ -136,7 +185,7 @@ async def get_miqdor(message: Message, state: FSMContext):
         "✅ Buyurtma ma'lumotlari:\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         f"👤 Ism:      {d['ism']}\n"
-        f"📞 Telefon:  {d['nomer']}\n"
+        f"📞 Telefon:  {secret_phone(d['nomer'])}\n"
         f"📍 Manzil:   {d['manzil']}\n"
         f"🛒 Mahsulot: {d['mahsulot']}\n"
         f"🔢 Miqdor:   {d['miqdor']}\n"
@@ -160,6 +209,10 @@ async def get_miqdor(message: Message, state: FSMContext):
 async def confirm_yes(message: Message, state: FSMContext):
     d = await state.get_data()
     user = message.from_user
+ 
+    # Tasdiqlashda bekor hisobini reset qilish
+    if user.id in bekor_hisobi:
+        bekor_hisobi[user.id]["count"] = 0
  
     await message.answer(
         "🎉 Buyurtmangiz qabul qilindi!\n"
@@ -187,22 +240,30 @@ async def confirm_yes(message: Message, state: FSMContext):
  
 @dp.message(Zakaz.tasdiqlash, F.text == "❌ Yo'q, bekor qilish")
 async def confirm_no(message: Message, state: FSMContext):
+    user_id = message.from_user.id
     await state.clear()
-    await message.answer(
-        "❌ Bekor qilindi. /zakaz orqali qaytadan boshlang.",
-        reply_markup=ReplyKeyboardRemove()
-    )
+ 
+    qoldi = add_bekor(user_id)
+ 
+    if qoldi == 0:
+        await message.answer(
+            f"🚫 Siz {MAX_BEKOR} marta bekor qildingiz!\n"
+            f"⏳ {BLOCK_MINUTES} daqiqaga bloklandingiz.",
+            reply_markup=ReplyKeyboardRemove()
+        )
+    else:
+        await message.answer(
+            f"❌ Bekor qilindi.\n"
+            f"⚠️ Diqqat: Yana {qoldi} marta bekor qilsangiz, bloklanasiz!\n\n"
+            "Qaytadan boshlash uchun /zakaz yozing.",
+            reply_markup=ReplyKeyboardRemove()
+        )
  
  
 @dp.message(Command("bekor"))
 async def bekor_handler(message: Message, state: FSMContext):
     await state.clear()
     await message.answer("❌ Bekor qilindi.", reply_markup=ReplyKeyboardRemove())
- 
- 
-@dp.message(Command("getid"))
-async def getid_handler(message: Message):
-    await message.answer(f"Bu chatning ID si: {message.chat.id}")
  
  
 async def main():
